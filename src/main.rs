@@ -36,6 +36,15 @@ impl PartialEq for Pixel {
 impl Eq for Pixel {}
 
 impl Pixel {
+    const fn zero() -> Self {
+        Self {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 0,
+        }
+    }
+
     const fn black() -> Self {
         Self {
             r: 0,
@@ -55,7 +64,7 @@ impl Index {
 
     const fn new() -> Self {
         Self {
-            inner: [Pixel::black(); Self::SIZE as usize],
+            inner: [Pixel::zero(); Self::SIZE as usize],
         }
     }
 
@@ -301,6 +310,8 @@ fn main() {
     //TODO: check header "size" value against actual size (minus header's 12 bytes)
 
     let pixels = decoder.collect::<Vec<_>>();
+
+    println!("Decoded");
 
     let pixels_raw = unsafe {
         slice::from_raw_parts(
