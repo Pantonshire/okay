@@ -2,6 +2,7 @@
 // [x] Decode
 // [ ] Encode
 // [ ] Image viewer
+// [ ] no_std
 
 use std::env;
 use std::fs;
