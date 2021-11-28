@@ -19,40 +19,75 @@ struct Header {
     size: u32,
 }
 
-#[repr(C, packed)]
+#[repr(transparent)]
 #[derive(Clone, Copy, Debug)]
 struct Pixel {
-    r: u8,
-    g: u8,
-    b: u8,
-    a: u8,
+    inner: [u8; Self::NUM_COMPONENTS],
 }
 
 impl PartialEq for Pixel {
     fn eq(&self, other: &Self) -> bool {
-        self.r == other.r && self.g == other.g && self.b == other.b && self.a == other.a
+        self.inner == other.inner
     }
 }
 
 impl Eq for Pixel {}
 
 impl Pixel {
-    const fn zero() -> Self {
+    const NUM_COMPONENTS: usize = 4;
+
+    const fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
         Self {
-            r: 0,
-            g: 0,
-            b: 0,
-            a: 0,
+            inner: [r, g, b, a]
         }
     }
 
+    const fn zero() -> Self {
+        Self::new(0, 0, 0, 0)
+    }
+
     const fn black() -> Self {
-        Self {
-            r: 0,
-            g: 0,
-            b: 0,
-            a: 255,
-        }
+        Self::new(0, 0, 0, u8::MAX)
+    }
+
+    #[inline]
+    fn r(&self) -> u8 {
+        self.inner[0]
+    }
+
+    #[inline]
+    fn r_mut(&mut self) -> &mut u8 {
+        &mut self.inner[0]
+    }
+
+    #[inline]
+    fn g(&self) -> u8 {
+        self.inner[1]
+    }
+
+    #[inline]
+    fn g_mut(&mut self) -> &mut u8 {
+        &mut self.inner[1]
+    }
+
+    #[inline]
+    fn b(&self) -> u8 {
+        self.inner[2]
+    }
+
+    #[inline]
+    fn b_mut(&mut self) -> &mut u8 {
+        &mut self.inner[2]
+    }
+
+    #[inline]
+    fn a(&self) -> u8 {
+        self.inner[3]
+    }
+
+    #[inline]
+    fn a_mut(&mut self) -> &mut u8 {
+        &mut self.inner[3]
     }
 }
 
@@ -70,7 +105,7 @@ impl Index {
     }
 
     fn pixel_hash(pixel: Pixel) -> u8 {
-        (pixel.r ^ pixel.g ^ pixel.b ^ pixel.a) % Self::SIZE
+        (pixel.r() ^ pixel.g() ^ pixel.b() ^ pixel.a()) % Self::SIZE
     }
 
     fn get(&self, i: u8) -> Pixel {
@@ -165,6 +200,13 @@ where
     const DIFF_4_MASK: u8 = 0b00001111;
     const DIFF_5_MASK: u8 = 0b00011111;
 
+    fn bytes(self) -> PixelDecoderBytes<I> {
+        PixelDecoderBytes {
+            decoder: self,
+            next_byte: Pixel::NUM_COMPONENTS,
+        }
+    }
+
     fn next_byte(&mut self) -> Option<u8> {
         self.iter.next()
     }
@@ -207,50 +249,50 @@ where
         }
         else if b1 & Self::MASK_2 == Self::CHUNK_DIFF_8 {
             // 10RRGGBB
-            self.prev.r = self.prev.r
+            *self.prev.r_mut() = self.prev.r()
                 .wrapping_add(((b1 >> 4) & Self::DIFF_2_MASK).wrapping_sub(1));
-            self.prev.g = self.prev.g
+            *self.prev.g_mut() = self.prev.g()
                 .wrapping_add(((b1 >> 2) & Self::DIFF_2_MASK).wrapping_sub(1));
-            self.prev.b = self.prev.b
+            *self.prev.b_mut() = self.prev.b()
                 .wrapping_add((b1 & Self::DIFF_2_MASK).wrapping_sub(1));
             self.index.put(self.prev);
         }
         else if b1 & Self::MASK_3 == Self::CHUNK_DIFF_16 {
             // 110RRRRR GGGGBBBB
             let b2 = self.next_byte()?;
-            self.prev.r = self.prev.r
+            *self.prev.r_mut() = self.prev.r()
                 .wrapping_add((b1 & Self::DIFF_5_MASK).wrapping_sub(15));
-            self.prev.g = self.prev.g
+            *self.prev.g_mut() = self.prev.g()
                 .wrapping_add(((b2 >> 4) & Self::DIFF_4_MASK).wrapping_sub(7));
-            self.prev.b = self.prev.b
+            *self.prev.b_mut() = self.prev.b()
                 .wrapping_add((b2 & Self::DIFF_4_MASK).wrapping_sub(7));
             self.index.put(self.prev);
         }
         else if b1 & Self::MASK_4 == Self::CHUNK_DIFF_24 {
             // 1110RRRR RGGGGGBB BBBAAAAA
             let [b2, b3] = self.next_bytes()?;
-            self.prev.r = self.prev.r
+            *self.prev.r_mut() = self.prev.r()
                 .wrapping_add((((b1 << 1) & Self::DIFF_5_MASK) | (b2 >> 7)).wrapping_sub(15));
-            self.prev.g = self.prev.g
+            *self.prev.g_mut() = self.prev.g()
                 .wrapping_add(((b2 >> 2) & Self::DIFF_5_MASK).wrapping_sub(15));
-            self.prev.b = self.prev.b
+            *self.prev.b_mut() = self.prev.b()
                 .wrapping_add((((b2 << 3) & Self::DIFF_5_MASK) | (b3 >> 5)).wrapping_sub(15));
-            self.prev.a = self.prev.a
+            *self.prev.a_mut() = self.prev.a()
                 .wrapping_add((b3 & Self::DIFF_5_MASK).wrapping_sub(15));
             self.index.put(self.prev);
         }
         else if b1 & Self::MASK_4 == Self::CHUNK_COLOUR {
             if b1 & Self::COLOUR_R_FLAG != 0 {
-                self.prev.r = self.next_byte()?;
+                *self.prev.r_mut() = self.next_byte()?;
             }
             if b1 & Self::COLOUR_G_FLAG != 0 {
-                self.prev.g = self.next_byte()?;
+                *self.prev.g_mut() = self.next_byte()?;
             }
             if b1 & Self::COLOUR_B_FLAG != 0 {
-                self.prev.b = self.next_byte()?;
+                *self.prev.b_mut() = self.next_byte()?;
             }
             if b1 & Self::COLOUR_A_FLAG != 0 {
-                self.prev.a = self.next_byte()?;
+                *self.prev.a_mut() = self.next_byte()?;
             }
             self.index.put(self.prev);
         }
@@ -260,6 +302,34 @@ where
     
     fn size_hint(&self) -> (usize, Option<usize>) {
         (0, self.remaining)
+    }
+}
+
+struct PixelDecoderBytes<I> {
+    decoder: PixelDecoder<I>,
+    next_byte: usize,
+}
+
+impl<I> Iterator for PixelDecoderBytes<I>
+where
+    I: Iterator<Item = u8>,
+{
+    type Item = u8;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next_byte < Pixel::NUM_COMPONENTS {
+            let b = self.decoder.prev.inner[self.next_byte];
+            self.next_byte += 1;
+            return Some(b);
+        }
+
+        self.next_byte = 1;
+        self.decoder.next().map(|p| p.inner[0])
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (min, max) = self.decoder.size_hint();
+        (min * Pixel::NUM_COMPONENTS, max.map(|max| max * Pixel::NUM_COMPONENTS))
     }
 }
 
@@ -310,16 +380,17 @@ fn main() {
 
     //TODO: check header "size" value against actual size (minus header's 12 bytes)
 
-    let pixels = decoder.collect::<Vec<_>>();
+    // let pixels = decoder.collect::<Vec<_>>();
+    let pixels_raw = decoder.bytes().collect::<Vec<_>>();
 
     println!("Decoded");
 
-    let pixels_raw = unsafe {
-        slice::from_raw_parts(
-            pixels.as_slice().as_ptr() as *const u8,
-            pixels.len() * mem::size_of::<Pixel>()
-        )
-    };
+    // let pixels_raw = unsafe {
+    //     slice::from_raw_parts(
+    //         pixels.as_slice().as_ptr() as *const u8,
+    //         pixels.len() * mem::size_of::<Pixel>()
+    //     )
+    // };
 
     let out_f = fs::File::create(out_path)
         .expect("failed to create output file");
@@ -327,7 +398,7 @@ fn main() {
 
     let encoder = image::codecs::png::PngEncoder::new(buf_writer);
 
-    encoder.write_image(pixels_raw, header.width as u32, header.height as u32, image::ColorType::Rgba8)
+    encoder.write_image(&pixels_raw, header.width as u32, header.height as u32, image::ColorType::Rgba8)
         .expect("failed to write image");
 
     println!("Done!");
