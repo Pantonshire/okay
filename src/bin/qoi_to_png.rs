@@ -1,33 +1,12 @@
-// TODO
-// [ ] Decode
-// [ ] Encode
-// [ ] Image viewer
-// [ ] no_std
-
-pub mod byte_stream;
-pub mod decode;
-pub mod header;
-mod hex;
-pub mod pixel;
-mod pixel_index;
-
 use std::env;
 use std::fs;
 use std::io::BufWriter;
-// use std::fs::File;
-// use std::io::BufReader;
-
-pub use decode::Decoder;
-pub use header::Header;
-pub use pixel::Pixel;
 
 use image::ImageEncoder;
 
-fn main() {
-    // let file = File::open("encoded.qoi").unwrap();
-    // let reader = BufReader::new(file);
-    // let (header, decoder) = Decoder::new_from_reader(reader).decode_header().unwrap();
+use okay::{Decoder, Pixel};
 
+fn main() {
     let args: Vec<String> = env::args().collect();
 
     let in_path = args.get(1)
@@ -48,7 +27,7 @@ fn main() {
 
     let encoder = image::codecs::png::PngEncoder::new(buf_writer);
 
-    encoder.write_image(&rgba, header.width as u32, header.height as u32, image::ColorType::Rgba8)
+    encoder.write_image(&rgba, header.width() as u32, header.height() as u32, image::ColorType::Rgba8)
         .unwrap();
 
     println!("Done!");

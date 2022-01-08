@@ -48,23 +48,21 @@ impl<'a> ByteStream for SliceByteStream<'a> {
     type IoError = Infallible;
 
     fn read_n<const N: usize>(&mut self) -> Result<[u8; N], StreamError<Self::IoError>> {
-        if self.slice.len() < N {
-            Err(StreamError::UnexpectedEof)
-        } else {
-            let ptr = self.slice.as_ptr() as *const [u8; N];
-            // SAFETY:
-            // We have already checked that the length of the slice is at least N, so `ptr` is a
-            // valid pointer to `[u8; N]`. Therefore, dereferencing the pointer is safe
-            let bytes = unsafe { *ptr };
-            self.slice = &self.slice[N..];
-            Ok(bytes)
-        }
+        let bytes = self.slice.get(..N)
+            .and_then(|slice| slice.try_into().ok())
+            .ok_or(StreamError::UnexpectedEof)?;
+        self.slice = &self.slice[N..];
+        Ok(bytes)
     }
 
     fn read_one(&mut self) -> Result<u8, StreamError<Self::IoError>> {
-        let (&byte, rest) = self.slice.split_first().ok_or(StreamError::UnexpectedEof)?;
-        self.slice = rest;
-        Ok(byte)
+        if self.slice.is_empty() {
+            Err(StreamError::UnexpectedEof)
+        } else {
+            let byte = self.slice[0];
+            self.slice = &self.slice[1..];
+            Ok(byte)
+        }
     }
 }
 

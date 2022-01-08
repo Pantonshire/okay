@@ -133,6 +133,7 @@ name = "okay"
 version = "0.1.0"
 dependencies = [
  "image",
+ "qoi",
 ]
 
 [[package]]
@@ -145,4 +146,13 @@ dependencies = [
  "crc32fast",
  "deflate",
  "miniz_oxide",
+]
+
+[[package]]
+name = "qoi"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21259622fa9dfe4a094c4c91a1ef9963324e2453136f55ad5b05a8850e6c6d19"
+dependencies = [
+ "bytemuck",
 ]
