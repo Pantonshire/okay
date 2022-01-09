@@ -20,7 +20,7 @@ fn main() {
     
     println!("{:?}", header);
 
-    let rgba = decoder.decode_bytes_all(Pixel::rgba).unwrap();
+    let rgba = decoder.decode_bytes_vec(Pixel::rgba).unwrap();
 
     let out_file = fs::File::create(out_path).unwrap();
     let buf_writer = BufWriter::new(out_file);

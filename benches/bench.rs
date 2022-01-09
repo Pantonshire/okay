@@ -12,7 +12,16 @@ fn bench_pixels_slice(b: &mut Bencher) {
     b.iter(|| {
         let bytes = fs::read("multibot.qoi").unwrap();
         let (_header, decoder) = okay::Decoder::new_from_slice(&bytes).decode_header().unwrap();
-        black_box(decoder.decode_pixels_all().unwrap());
+        black_box(decoder.decode_pixels_vec().unwrap());
+    });
+}
+
+#[bench]
+fn bench_bytes_slice(b: &mut Bencher) {
+    b.iter(|| {
+        let bytes = fs::read("multibot.qoi").unwrap();
+        let (_header, decoder) = okay::Decoder::new_from_slice(&bytes).decode_header().unwrap();
+        black_box(decoder.decode_bytes_vec(okay::Pixel::rgba).unwrap());
     });
 }
 
@@ -21,7 +30,16 @@ fn bench_pixels_iter(b: &mut Bencher) {
     b.iter(|| {
         let bytes = fs::read("multibot.qoi").unwrap();
         let (_header, decoder) = okay::Decoder::new_from_iter(bytes).decode_header().unwrap();
-        black_box(decoder.decode_pixels_all().unwrap());
+        black_box(decoder.decode_pixels_vec().unwrap());
+    });
+}
+
+#[bench]
+fn bench_bytes_iter(b: &mut Bencher) {
+    b.iter(|| {
+        let bytes = fs::read("multibot.qoi").unwrap();
+        let (_header, decoder) = okay::Decoder::new_from_iter(bytes).decode_header().unwrap();
+        black_box(decoder.decode_bytes_vec(okay::Pixel::rgba).unwrap());
     });
 }
 
@@ -31,7 +49,7 @@ fn bench_pixels_read(b: &mut Bencher) {
         let file = File::open("multibot.qoi").unwrap();
         let buf_reader = BufReader::new(file);
         let (_header, decoder) = okay::Decoder::new_from_reader(buf_reader).decode_header().unwrap();
-        black_box(decoder.decode_pixels_all().unwrap());
+        black_box(decoder.decode_pixels_vec().unwrap());
     });
 }
 
@@ -41,7 +59,7 @@ fn bench_bytes_read(b: &mut Bencher) {
         let file = File::open("multibot.qoi").unwrap();
         let buf_reader = BufReader::new(file);
         let (_header, decoder) = okay::Decoder::new_from_reader(buf_reader).decode_header().unwrap();
-        black_box(decoder.decode_bytes_all(okay::Pixel::rgba).unwrap());
+        black_box(decoder.decode_bytes_vec(okay::Pixel::rgba).unwrap());
     });
 }
 

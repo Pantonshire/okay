@@ -79,7 +79,6 @@ pub struct PixelDecoder<S> {
     index: PixelIndex,
     remaining: u64,
     run: u8,
-    errored: bool,
 }
 
 impl<S> PixelDecoder<S>
@@ -93,47 +92,40 @@ where
             index: PixelIndex::new(),
             remaining: num_pixels,
             run: 0,
-            errored: false,
         }
     }
 
+    /// Decodes pixels into the given buffer until the buffer becomes full or the end of the image is
+    /// reached, whichever comes first. The returned `usize` is the number of pixels written to the
+    /// buffer. The returned `bool` is true if all of the pixels have been decoded after this operation,
+    /// and false if there are still more pixels that need to be decoded after this operation.
     pub fn decode_pixels_into(
         &mut self,
         buf: &mut [Pixel],
-    ) -> Result<usize, StreamError<S::IoError>> {
-        // let mut i = 0;
-        // let len = buf.len();
-
-        // while i < len {
-        //     buf[i] = match self.next() {
-        //         None => break,
-        //         Some(Err(err)) => return Err(err),
-        //         Some(Ok(pixel)) => pixel,
-        //     };
-
-        //     i += 1;
-        // }
-
-        // Ok(i)
-
-        todo!()
+    ) -> Result<(usize, bool), StreamError<S::IoError>> {
+        self.decode_into_pixel_buf(buf, convert::identity)
     }
 
-    pub fn decode_pixels_all(mut self) -> Result<Vec<Pixel>, DecodeAllError<S::IoError>> {
-        let size = self.remaining.try_into().map_err(|_| DecodeAllError::TooLarge)?;
+    /// Allocates a new vec large enough for all of the remaining pixels, decodes all of the remaining
+    /// pixels into the vec, and returns the buffer. Returns a `DecodeAllError::TooLarge` if allocating
+    /// a vec large enough is not possible.
+    pub fn decode_pixels_vec(mut self) -> Result<Vec<Pixel>, DecodeAllError<S::IoError>> {
+        let num_pixels = self.remaining.try_into().map_err(|_| DecodeAllError::TooLarge)?;
 
         let mut buf = Vec::new();
-        buf.try_reserve_exact(size)
+        buf.try_reserve_exact(num_pixels)
             .map_err(|_| DecodeAllError::TooLarge)?;
 
         let ptr = buf.as_mut_ptr();
-        let dst = unsafe { slice::from_raw_parts_mut(ptr, size) };
+        let dst = unsafe { slice::from_raw_parts_mut(ptr, num_pixels) };
 
-        let n = self.decode_into(dst, convert::identity)?;
+        let (n, exhausted) = self.decode_into_pixel_buf(dst, convert::identity)?;
 
         unsafe {
             buf.set_len(n);
         }
+
+        debug_assert!(exhausted);
 
         Ok(buf)
     }
@@ -142,70 +134,74 @@ where
         &mut self,
         buf: &mut [u8],
         transform: F,
-    ) -> Result<usize, StreamError<S::IoError>>
+    ) -> Result<(usize, bool), StreamError<S::IoError>>
     where
         F: Fn(Pixel) -> [u8; N],
     {
-        // let mut i = 0;
-        // let len = buf.len();
+        assert!(N != 0);
 
-        // while i + N <= len {
-        //     let pixel = match self.next() {
-        //         None => break,
-        //         Some(Err(err)) => return Err(err),
-        //         Some(Ok(pixel)) => pixel,
-        //     };
+        let num_pixels = buf.len() / N;
 
-        //     let bytes = transform(pixel);
+        let ptr = buf.as_mut_ptr() as *mut [u8; N];
+        let dst = unsafe { slice::from_raw_parts_mut(ptr, num_pixels) };
 
-        //     for byte in bytes {
-        //         buf[i] = byte;
-        //         i += 1;
-        //     }
-        // }
-
-        // Ok(i)
-
-        todo!()
+        self.decode_into_pixel_buf(dst, transform)
+            .map(|(n, exhausted)| (n * N, exhausted))
     }
 
-    pub fn decode_bytes_all<F, const N: usize>(
+    pub fn decode_bytes_vec<F, const N: usize>(
         mut self,
         transform: F,
     ) -> Result<Vec<u8>, DecodeAllError<S::IoError>>
     where
         F: Fn(Pixel) -> [u8; N],
     {
-        let size = usize::try_from(self.remaining)
-            .ok()
-            .and_then(|size| size.checked_mul(N))
+        assert!(N != 0);
+
+        let num_pixels = usize::try_from(self.remaining)
+            .map_err(|_| DecodeAllError::TooLarge)?;
+
+        let num_bytes = num_pixels.checked_mul(N)
             .ok_or(DecodeAllError::TooLarge)?;
 
         let mut buf = Vec::new();
-        buf.try_reserve_exact(size)
+        buf.try_reserve_exact(num_bytes)
             .map_err(|_| DecodeAllError::TooLarge)?;
 
         let ptr = buf.as_mut_ptr() as *mut [u8; N];
-        let dst = unsafe { slice::from_raw_parts_mut(ptr, size) };
+        let dst = unsafe { slice::from_raw_parts_mut(ptr, num_pixels) };
 
-        let n = self.decode_into(dst, transform)?;
+        let (n, exhausted) = self.decode_into_pixel_buf(dst, transform)?;
 
         unsafe {
             buf.set_len(n * N);
         }
 
+        debug_assert!(exhausted);
+
         Ok(buf)
     }
 
+    /// Returns the number of pixels remaining to be decoded. This is an upper bound on how many more
+    /// pixels the decoder can output; fewer pixels will be output if the byte stream ends prematurely or
+    /// contains invalid data.
     pub fn remaining_pixels(&self) -> u64 {
         self.remaining
     }
 
-    fn decode_into<T, F>(&mut self, buf: &mut [T], transform: F) -> Result<usize, StreamError<S::IoError>>
+    fn decode_into_pixel_buf<T, F>(
+        &mut self,
+        buf: &mut [T],
+        transform: F,
+    ) -> Result<(usize, bool), StreamError<S::IoError>>
     where
         F: Fn(Pixel) -> T,
     {
-        let num_pixels = self.remaining.min(buf.len() as u64) as usize;
+        let (num_pixels, exhausted) = if !usize::try_from(self.remaining).is_ok() || buf.len() < self.remaining as usize {
+            (buf.len(), false)
+        } else {
+            (self.remaining as usize, true)
+        };
 
         for i in 0..num_pixels {
             if self.run > 0 {
@@ -286,117 +282,7 @@ where
         }
 
         self.remaining -= num_pixels as u64;
-        Ok(num_pixels)
-    }
-}
-
-impl<S> Iterator for PixelDecoder<S>
-where
-    S: ByteStream,
-{
-    type Item = Result<Pixel, StreamError<S::IoError>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        macro_rules! decoder_try {
-            ($e:expr, $errored:expr) => {
-                match $e {
-                    Ok(v) => v,
-                    Err(err) => {
-                        $errored = true;
-                        return Some(Err(err.into()));
-                    }
-                }
-            };
-        }
-
-        if self.errored || self.remaining == 0 {
-            return None;
-        }
-
-        self.remaining -= 1;
-
-        if self.run > 0 {
-            self.run -= 1;
-            return Some(Ok(self.previous));
-        }
-
-        let b0 = decoder_try!(self.stream.read_one(), self.errored);
-
-        match b0 {
-            // QOI_OP_RGB
-            0xFE => {
-                let [r, g, b] = decoder_try!(self.stream.read_n(), self.errored);
-                self.previous.r = r;
-                self.previous.g = g;
-                self.previous.b = b;
-                self.index.insert(self.previous);
-            }
-
-            // QOI_OP_RGBA
-            0xFF => {
-                let [r, g, b, a] = decoder_try!(self.stream.read_n(), self.errored);
-                self.previous = Pixel::new(r, g, b, a);
-                self.index.insert(self.previous);
-            }
-
-            _ => match b0 >> 6 {
-                // QOI_OP_INDEX
-                0x0 => {
-                    self.previous = self.index.masked_get(b0);
-                }
-
-                // QOI_OP_DIFF
-                0x1 => {
-                    self.previous.r = self
-                        .previous
-                        .r
-                        .wrapping_sub(2)
-                        .wrapping_add((b0 >> 4) & 0x3);
-                    self.previous.g = self
-                        .previous
-                        .g
-                        .wrapping_sub(2)
-                        .wrapping_add((b0 >> 2) & 0x3);
-                    self.previous.b = self.previous.b.wrapping_sub(2).wrapping_add(b0 & 0x3);
-                    self.index.insert(self.previous);
-                }
-
-                // QOI_OP_LUMA
-                0x2 => {
-                    let b1 = decoder_try!(self.stream.read_one(), self.errored);
-                    let dg = (b0 & 0x3F).wrapping_sub(32);
-                    self.previous.r = self
-                        .previous
-                        .r
-                        .wrapping_add(dg)
-                        .wrapping_sub(8)
-                        .wrapping_add((b1 >> 4) & 0x0F);
-                    self.previous.g = self.previous.g.wrapping_add(dg);
-                    self.previous.b = self
-                        .previous
-                        .b
-                        .wrapping_add(dg)
-                        .wrapping_sub(8)
-                        .wrapping_add(b1 & 0x0F);
-                    self.index.insert(self.previous);
-                }
-
-                // QOI_OP_RUN
-                _ => {
-                    self.run = b0 & 0x3F;
-                }
-            },
-        }
-
-        Some(Ok(self.previous))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        if self.errored || self.remaining == 0 {
-            (0, Some(0))
-        } else {
-            (1, self.remaining.try_into().ok())
-        }
+        Ok((num_pixels, exhausted))
     }
 }
 
